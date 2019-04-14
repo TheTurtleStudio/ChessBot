@@ -1,19 +1,3 @@
-'''
-Current Error:
-    Traceback (most recent call last):
-      Program, line 82, in <module>
-        createBoard(sizeBase, tileMeasurements)
-      Program, line 41, in createBoard
-        playtiles.add(newtile)
-      File "C:\Users\ME! :D BRAYDEN HOOOOOORAAYYYY\AppData\Roaming\Python\Python36\site-packages\pygame\sprite.py", line 360, in add
-        sprite.add_internal(self)
-      File "C:\Users\ME AGAIN\AppData\Roaming\Python\Python36\site-packages\pygame\sprite.py", line 163, in add_internal
-        self.__g[group] = 0
-    AttributeError: 'Tile' object has no attribute '_Sprite__g'
-    (note from Brawg:Tile is at line 42... plz help)
-'''
-
-
 #minimax
 import pygame, sys, time
 from pygame.locals import *
