@@ -2,6 +2,7 @@
 import pygame, sys, time
 from pygame.locals import *
 import time
+import pygame.gfxdraw
 
 boardString = "" # 1=whitespace 2=blackspace 3=user 4=computer 5=selected
 
@@ -36,7 +37,17 @@ pygame.draw.rect(black_square, black, (0,0,tileMeasurements,tileMeasurements),0)
 black_circle = pygame.Surface((tileMeasurements,tileMeasurements), pygame.SRCALPHA, 32)
 black_circle.convert_alpha()
 x = black_circle.get_rect()
-pygame.draw.circle(black_circle,black,x.center,15)
+pygame.draw.circle(black_circle,black,x.center,9)
+
+user_circle = pygame.Surface((tileMeasurements,tileMeasurements), pygame.SRCALPHA, 32)
+user_circle.convert_alpha()
+x = user_circle.get_rect()
+pygame.draw.circle(user_circle,user,x.center,9)
+
+computer_circle = pygame.Surface((tileMeasurements,tileMeasurements), pygame.SRCALPHA, 32)
+computer_circle.convert_alpha()
+x = computer_circle.get_rect()
+pygame.draw.circle(computer_circle,computer,x.center,9)
 #pygame.draw.circle(black_circle,black,(x.centerx+tileMeasurements,x.centery/2),15)
 playing = True
 
@@ -67,7 +78,7 @@ class Tile(pygame.sprite.Sprite):
 
 
 class gamePiece(pygame.sprite.Sprite):
-    def __init__(self, color, tile_location, name, posX, posY, radius):
+    def __init__(self, color, tile_location, name, posX, posY, radius, direction):
         pygame.sprite.Sprite.__init__(self)
         self.originalimage = pygame.Surface((tileMeasurements,tileMeasurements), pygame.SRCALPHA, 32)
         self.originalimage.convert_alpha()
@@ -79,6 +90,7 @@ class gamePiece(pygame.sprite.Sprite):
         self.name = name
         self.tile_location = tile_location
         self.selected = False
+        self.direction = direction
 
                 
 def createBoard(screenSizeXY, tileSize):
@@ -90,7 +102,7 @@ def createBoard(screenSizeXY, tileSize):
         if tileY <= 2*tileSize:
             tile_location = {'row': int(tileY/(screenSizeXY/(screenSizeXY/tileSize))+1), 'col': int(tileX/(screenSizeXY/(screenSizeXY/tileSize))+1)}
             playtiles.add(Tile(black, "Tile", tileX, tileY, tileSize, tileSize, occupied=True, owner='computer', tile_location=tile_location))
-            gamepiece_group.add(gamePiece(computer, tile_location, 'computer', tileX, tileY, int(tileSize*0.4)))
+            gamepiece_group.add(gamePiece(computer, tile_location, 'computer', tileX, tileY, int(tileSize*0.4), 'down'))
             
             if offset:
                 boardString = boardString + "41"
@@ -100,7 +112,7 @@ def createBoard(screenSizeXY, tileSize):
         elif tileY >= ((screenSizeXY/tileSize)-3)*tileSize:
             tile_location = {'row': int(tileY/(screenSizeXY/(screenSizeXY/tileSize))+1), 'col': int(tileX/(screenSizeXY/(screenSizeXY/tileSize))+1)}
             playtiles.add(Tile(black, "Tile", tileX, tileY, tileSize, tileSize, occupied=True, owner='user', tile_location=tile_location))
-            gamepiece_group.add(gamePiece(user, tile_location, 'user', tileX, tileY, int(tileSize*0.4)))
+            gamepiece_group.add(gamePiece(user, tile_location, 'user', tileX, tileY, int(tileSize*0.4), 'up'))
          
             if offset:
                 boardString = boardString + "31"
@@ -129,17 +141,25 @@ def createBoard(screenSizeXY, tileSize):
 
 
 def remove_highlight():
-    screen.blit(black_square, (origin_tile.rect.x, origin_tile.rect.y))
+    if active_player == 'user':
+        circle = user_circle
+    else:
+        circle = computer_circle
+    screen.blit(circle, (selected_piece.rect.x, selected_piece.rect.y))
 
 def add_highlight():
     screen.blit(black_circle, (selected_piece.rect.x, selected_piece.rect.y))
 
 def switch_player():
-    global active_player
+    global active_player, move_pending, selected_piece
     if active_player == 'user':
         active_player = 'computer'
     else:
         active_player = 'user'
+    if move_pending:
+        move_pending = False
+        selected_piece = None
+        print('USER TURN IS OVER')
 
 def check_game_score():
     global playing
@@ -165,6 +185,8 @@ def check_if_piece_clicked(mouse):
     for piece in gamepiece_group:
         if piece.rect.collidepoint(mouse): # Find the game piece that is being clicked
             if piece.name == active_player and not move_pending: # Only select a piece if it belongs to the active player and move is not pending
+                if selected_piece:
+                    remove_highlight()
                 piece.selected = True
                 selected_piece = piece
                 add_highlight()
@@ -187,16 +209,13 @@ def make_move():
 
         
 def check_for_valid_move(): # Check if the move is valid and return True if it is. Otherwise returns implicitly as None.
-    global selected_piece, gamepiece, origin_tile, user_score, computer_score, middle_tile
+    global selected_piece, gamepiece, origin_tile, user_score, computer_score, middle_tile, move_pending
 
     for tile in playtiles:
         if tile.rect.x == selected_piece.rect.x and tile.rect.y == selected_piece.rect.y:
             origin_tile = tile # This is the tile where the moving piece came from
             
-    if active_player == 'user': # Need to modify to allow a value of 'both' for King pieces
-        direction = 'up'
-    else:
-        direction = 'down'
+    direction = selected_piece.direction
 
     origin_row = origin_tile.tile_location['row']
     origin_column = origin_tile.tile_location['col']
@@ -205,76 +224,84 @@ def check_for_valid_move(): # Check if the move is valid and return True if it i
 
 
     if destination_row == origin_row + 1: # Piece is trying to move down 1 row
+        if move_pending:
+            return
         if direction == 'down' or direction == 'both':
-            if active_player == 'computer':
-                if destination_column == origin_column + 1 or destination_column == origin_column - 1: # Piece is trying to move 1 tile to the left or right
-                    if not destination_tile.occupied: # Only allow if destination is not occupied
-                        return True
+            if destination_column == origin_column + 1 or destination_column == origin_column - 1: # Piece is trying to move 1 tile to the left or right
+                if not destination_tile.occupied: # Only allow if destination is not occupied
+                    return True
 
 
                     
     elif destination_row == origin_row - 1: # Piece is trying to move up 1 row
+        if move_pending:
+            return
         if direction == 'up' or direction == 'both':
-            if active_player == 'user':
-                if destination_column == origin_column + 1 or destination_column == origin_column - 1:
-                    if not destination_tile.occupied:
-                        return True
+            if destination_column == origin_column + 1 or destination_column == origin_column - 1:
+                if not destination_tile.occupied:
+                    return True
 
 
 
     elif destination_row == origin_row + 2: # Piece is trying to move down 2 rows, possible jump
         if direction == 'down' or direction == 'both':
-            if active_player == 'computer':
-                if destination_column == origin_column + 2 or destination_column == origin_column - 2: # Piece is trying to move 2 tiles to the left or right
-                    if destination_column == origin_column + 2: # jumping right
-                        for tile in playtiles:
-                            if tile.tile_location['row'] == origin_row + 1 and tile.tile_location['col'] == origin_column + 1:
-                                if tile.owner and not tile.owner == active_player:
-                                    if not destination_tile.occupied:
-                                        game_score[active_player] += 1
-                                        middle_tile = tile
-                                        tile.owner = None
-                                        tile.occupied = False
-                                        return True
-                    elif destination_column == origin_column - 2: # jumping to left
-                        for tile in playtiles: # Looping the tiles to find the tile that's being jumped.
-                            if tile.tile_location['row'] == origin_row + 1 and tile.tile_location['col'] == origin_column - 1: # This is the tile being jumped
-                                if tile.owner and not tile.owner == active_player: # Make sure the owner of the tile is the opponent so you don't jump your own piece
-                                    if not destination_tile.occupied:
-                                        game_score[active_player] += 1
-                                        middle_tile = tile 
-                                        tile.owner = None # Remove the owner of the tile that was just jumped
-                                        tile.occupied = False # Mark the tile as unoccupied
-                                        return True
+            if destination_column == origin_column + 2 or destination_column == origin_column - 2: # Piece is trying to move 2 tiles to the left or right
+                if destination_column == origin_column + 2: # jumping right
+                    for tile in playtiles:
+                        if tile.tile_location['row'] == origin_row + 1 and tile.tile_location['col'] == origin_column + 1:
+                            if tile.owner and not tile.owner == active_player:
+                                if not destination_tile.occupied:
+                                    game_score[active_player] += 1
+                                    middle_tile = tile
+                                    tile.owner = None
+                                    tile.occupied = False
+                                    if active_player == 'user':
+                                        move_pending = True
+                                    return True
+                elif destination_column == origin_column - 2: # jumping to left
+                    for tile in playtiles: # Looping the tiles to find the tile that's being jumped.
+                        if tile.tile_location['row'] == origin_row + 1 and tile.tile_location['col'] == origin_column - 1: # This is the tile being jumped
+                            if tile.owner and not tile.owner == active_player: # Make sure the owner of the tile is the opponent so you don't jump your own piece
+                                if not destination_tile.occupied:
+                                    game_score[active_player] += 1
+                                    middle_tile = tile 
+                                    tile.owner = None # Remove the owner of the tile that was just jumped
+                                    tile.occupied = False # Mark the tile as unoccupied
+                                    if active_player == 'user':
+                                        move_pending = True
+                                    return True
 
 
 
                                     
     elif destination_row == origin_row - 2: # Piece is trying to move up 2 rows, possible jump
         if direction == 'up' or direction == 'both':
-            if active_player == 'user':
-                move_type = 'jumping'
-                if destination_column == origin_column + 2 or destination_column == origin_column - 2:
-                    if destination_column == origin_column + 2: # jumping to right
-                        for tile in playtiles:
-                            if tile.tile_location['row'] == origin_row - 1 and tile.tile_location['col'] == origin_column + 1:
-                                if tile.owner and not tile.owner == active_player:
-                                    if not destination_tile.occupied:
-                                        game_score[active_player] += 1
-                                        middle_tile = tile
-                                        tile.owner = None
-                                        tile.occupied = False
-                                        return True
-                    elif destination_column == origin_column - 2: # jumping to left
-                        for tile in playtiles:
-                            if tile.tile_location['row'] == origin_row - 1 and tile.tile_location['col'] == origin_column - 1:
-                                if tile.owner and not tile.owner == active_player:
-                                    if not destination_tile.occupied:
-                                        game_score[active_player] += 1
-                                        middle_tile = tile
-                                        tile.owner = None
-                                        tile.occupied = False
-                                        return True
+            if destination_column == origin_column + 2 or destination_column == origin_column - 2:
+                if destination_column == origin_column + 2: # jumping to right
+                    for tile in playtiles:
+                        if tile.tile_location['row'] == origin_row - 1 and tile.tile_location['col'] == origin_column + 1:
+                            if tile.owner and not tile.owner == active_player:
+                                if not destination_tile.occupied:
+                                    game_score[active_player] += 1
+                                    middle_tile = tile
+                                    tile.owner = None
+                                    tile.occupied = False
+                                    if active_player == 'user':
+                                        move_pending = True #This is a valid jump so I set this to True to prevent selecting a different piece after a jump.
+                                    return True
+                
+                elif destination_column == origin_column - 2: # jumping to left
+                    for tile in playtiles:
+                        if tile.tile_location['row'] == origin_row - 1 and tile.tile_location['col'] == origin_column - 1:
+                            if tile.owner and not tile.owner == active_player:
+                                if not destination_tile.occupied:
+                                    game_score[active_player] += 1
+                                    middle_tile = tile
+                                    tile.owner = None
+                                    tile.occupied = False
+                                    if active_player == 'user':
+                                        move_pending = True
+                                    return True
     
 
         
@@ -291,7 +318,7 @@ def _move(): # This should really only be called by make_move()
     selected_piece.rect.x = destination_tile.rect.x
     selected_piece.rect.y = destination_tile.rect.y
     gamepiece_group.draw(screen)
-    selected_piece = None
+        
     if middle_tile:
         for piece in gamepiece_group:
             if piece.rect.x == middle_tile.rect.x and piece.rect.y == middle_tile.rect.y:
@@ -302,7 +329,19 @@ def _move(): # This should really only be called by make_move()
         middle_tile = None
         jumped_piece = None
         check_game_score() # Check the game score and end the game if there is a winner
-    switch_player() # Move is done, switch player.
+
+    # WE NEED TO CHECK RIGHT HERE IF THE PIECE HAS REACHED THE
+    # FAR END OF THE BOARD OF THE OPPONENTS SIDE. THIS PIECE
+    # SHOULD BECOME A KING PIECE THAT CAN MOVE BOTH DIRECTIONS NOW.
+    
+    # If the piece has reached the oppenents far side then
+    # set selected_piece.direction = 'both'
+    
+    if not move_pending:
+        selected_piece=None
+        switch_player() # Move is done and move_pending is False, switch player.
+    else:
+        add_highlight()
     
 
 
@@ -322,12 +361,18 @@ winning_score = len(gamepiece_group) / 2 # The score required to win the game.
 while playing:
     for event in pygame.event.get():
         if event.type == pygame.QUIT:
-            quit()
+            pygame.quit()
+            sys.exit()
         if event.type == pygame.MOUSEBUTTONUP:
             mouse = pygame.mouse.get_pos()
             check_if_piece_clicked(mouse) # Check if a game piece was clicked
             if check_if_tile_clicked(mouse): # Check if a tile was clicked                                                          
                 make_move() # Attempt the move
+        if event.type == pygame.KEYUP:
+            if event.key == pygame.K_SPACE and move_pending:
+                remove_highlight()
+                switch_player()
+                
                         
             
     pygame.display.flip()
